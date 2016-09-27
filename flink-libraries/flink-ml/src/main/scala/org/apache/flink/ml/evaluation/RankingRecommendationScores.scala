@@ -26,6 +26,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.scala._
 import org.apache.flink.ml._
 import java.io.Serializable
+//import org.apache.flink.ml.RichNumericDataSet
 
 import org.apache.flink.api.common.operators.Order
 import org.apache.flink.ml.pipeline.Predictor
@@ -115,7 +116,8 @@ class RankingRecommendationScores(val topK : Int) {
     val dcgsV = dcgs(rankingPredictions, test)
     val ndcgsV = ndcgs(dcgsV, idcgsV)
 
-    ndcgsV.map(_._2).mean().collect().head
+//    ndcgsV.map(_._2).mean().collect().head
+    ndcgsV.sum(1).map(_._2).collect().head/ndcgsV.count()
   }
 
   def joinWithTest(rankingPredictions : DataSet[(Int,Int,Int)], test : DataSet[(Int,Int,Double)]) : DataSet[(Int,Int,Option[Int],String)] = {
