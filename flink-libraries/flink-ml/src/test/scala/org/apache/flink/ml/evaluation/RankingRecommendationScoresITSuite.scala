@@ -49,7 +49,8 @@ class RankingRecommendationScoresITSuite extends FlatSpec with Matchers with Fli
           (2,1,0.9),
           (2,2,0.8),
           (2,3,1.0),
-          (2,4,0.1)
+          (2,4,0.1),
+          (2,5,0.9)
         ))
       }
     }
@@ -59,8 +60,8 @@ class RankingRecommendationScoresITSuite extends FlatSpec with Matchers with Fli
       (1,2,2),
       (1,3,3),
       (2,3,1),
-      (2,1,2),
-      (2,2,3)
+      (2,5,2),
+      (2,1,3)
     )
   }
   it should "exclude pairs from ranking predictions if asked to" in {
@@ -268,8 +269,7 @@ class RankingRecommendationScoresITSuite extends FlatSpec with Matchers with Fli
       (1,1,Some(1),"true_positive"),
       (1,2,None,"false_negative"),
       (1,3,Some(3),"true_positive"),
-      (1,10,Some(2),"false_positive")
-      ,
+      (1,10,Some(2),"false_positive"),
       (2,1,Some(3),"true_positive"),
       (2,3,None,"false_negative"),
       (2,4,Some(1),"false_positive"),
@@ -281,12 +281,47 @@ class RankingRecommendationScoresITSuite extends FlatSpec with Matchers with Fli
     val rankRecScores = new RankingRecommendationScores(3)
     val counted = rankRecScores.countTypesUpToK(setToCount).collect()
     counted.toSet shouldEqual Set(
-      (1,1,1,0,1),
-      (1,2,1,1,1),
+      (1,1,1,0,2),
+      (1,2,1,1,2),
       (1,3,2,1,1),
-      (2,1,0,1,4),
-      (2,2,1,1,4),
+      (2,1,0,1,6),
+      (2,2,1,1,5),
       (2,3,2,1,4)
+    )
+  }
+  it should "calculate mean average precision per user correctly" in {
+    val env = ExecutionEnvironment.getExecutionEnvironment
+    val recommendations = env.fromCollection(Seq(
+      (1,1,1),
+      (1,2,2),
+      (1,3,3),
+      (2,4,1),
+      (2,5,2),
+      (2,1,3)
+    ))
+    val test = env.fromCollection(Seq(
+      (1,1,1.0),
+      (1,10,2.0),
+      (2,1,1.0),
+      (2,3,1.0),
+      (2,12,1.0),
+      (2,5,1.0),
+      (2,13,1.0),
+      (2,7,1.0)
+    ))
+    val rankRecScores = new RankingRecommendationScores(3)
+    val precisionAndRecall = rankRecScores.meanAveragePrecisionAndRecall(recommendations, test).collect()
+
+//    (1,1,1,0,1)
+//    (1,2,1,1,1)
+//    (1,3,1,2,1)
+//    (2,1,0,1,6)
+//    (2,2,1,1,5)
+//    (2,3,2,1,4)
+
+    precisionAndRecall.toSet shouldEqual Set(
+      (1, (1.0/1.0+1.0/2.0+1.0/3.0)/3, (1.0/2.0 + 1.0/2.0 + 1.0/2.0)/3),
+      (2, (0.0/1.0+1.0/2.0+2.0/3.0)/3, (0.0/6.0 + 1.0/6.0 + 2.0/6.0)/3)
     )
   }
 }

@@ -24,8 +24,17 @@ import org.apache.flink.ml.recommendation.ALS
 import org.apache.flink.util.Collector
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.scala._
+
+import scala.collection.mutable.SortedSet
 import org.apache.flink.ml._
 import java.io.Serializable
+import java.lang.Iterable
+
+import org.apache.flink.api.common.functions.{CombineFunction, GroupCombineFunction, RichGroupReduceFunction}
+
+import scala.collection.mutable
+import collection.JavaConverters.mapAsScalaMapConverter
+
 //import org.apache.flink.ml.RichNumericDataSet
 
 import org.apache.flink.api.common.operators.Order
@@ -62,9 +71,25 @@ class RankingRecommendationScores(val topK : Int) {
     val topKcopy = topK
     predictScores(als, userItemPairs)
       .groupBy(0)
-      .sortGroup(2, Order.DESCENDING)
-      .reduceGroup( _.zip((1 to topKcopy).toIterator) )
-      .flatMap( _.map { case ((u,i,pred),rank) => (u,i,rank) } )
+      .combineGroup((elements, collector : Collector[(Int,Array[(Int,Double)])])=>{
+        val bufferedElements = elements.buffered
+        val head = bufferedElements.head
+        var topKitems = mutable.SortedSet[(Int,Int,Double)]()(Ordering[(Double, Int)].reverse.on(x => (x._3, x._2)))
+        for(e <- bufferedElements){
+          topKitems += e
+          if(topKitems.size > topKcopy){
+            topKitems = topKitems.dropRight(1)
+          }
+        }
+        collector.collect((head._1,topKitems.toArray.map(x=>(x._2, x._3))))
+      })
+      .groupBy(0)
+      .reduce((l,r)=>{
+        var topKitems = mutable.SortedSet[(Int,Double)]()(Ordering[(Double, Int)].reverse.on(x => (x._2, x._1)))
+        topKitems ++= l._2 ++= r._2
+        (l._1, topKitems.take(topKcopy).toArray)
+      })
+      .flatMap(x=>for(e<-x._2.zip(1 to topKcopy)) yield (x._1, e._1._1, e._2))
   }
 
   def idcgs(test: DataSet[(Int,Int,Double)]): DataSet[(Int, Double)] = {
@@ -158,9 +183,10 @@ class RankingRecommendationScores(val topK : Int) {
     .groupBy(0)
     .sortGroup(2, Order.ASCENDING)
     .reduceGroup((elements,collector:Collector[(Int,Int,Int,Int,Int)]) => {
-      val bufferedElements = elements.buffered
+      val bufferedElements = elements.toList
       val user=bufferedElements.head._1
       var truePositive, falsePositive, falseNegative=0
+      val allTruePositive = bufferedElements.count(_._4=="true_positive")
       for((_,_,rank,t)<-bufferedElements) {
         t match {
           case "true_positive" => truePositive += 1
@@ -168,21 +194,48 @@ class RankingRecommendationScores(val topK : Int) {
           case "false_negative" => falseNegative += 1
         }
         if(rank != 0){
-          collector.collect((user,rank,truePositive,falsePositive,falseNegative))
+          collector.collect((user,rank,truePositive,falsePositive,falseNegative+(allTruePositive-truePositive)))
         }
       }
     })
 
+
   def precisions(rankingPredictions : DataSet[(Int,Int,Int)], test : DataSet[(Int,Int,Double)]) : DataSet[(Int,Double)] = {
     val countedPerUser = countTypes(joinWithTest(rankingPredictions,test))
-    countedPerUser.map(x=>x match {
-      case (user, truePositive, falsePositive, falseNegative) => (user, truePositive.toDouble/(truePositive.toDouble+falsePositive.toDouble))
-    })
+
+    val calculatePrecision = (user:Int, truePositive:Int, falsePositive:Int, falseNegative:Int) =>
+      truePositive.toDouble/(truePositive.toDouble+falsePositive.toDouble)
+
+    countedPerUser.map(x=>(x._1, calculatePrecision.tupled(x)))
   }
+
   def recalls(rankingPredictions : DataSet[(Int,Int,Int)], test : DataSet[(Int,Int,Double)]) : DataSet[(Int,Double)] = {
     val countedPerUser = countTypes(joinWithTest(rankingPredictions,test))
-    countedPerUser.map(x=>x match {
-      case (user, truePositive, falsePositive, falseNegative) => (user, truePositive.toDouble/(truePositive.toDouble+falseNegative.toDouble))
-    })
+
+    val calculateRecall = (user:Int, truePositive:Int, falsePositive:Int, falseNegative:Int) =>
+      truePositive.toDouble/(truePositive.toDouble+falseNegative.toDouble)
+
+    countedPerUser.map(x=>(x._1, calculateRecall.tupled(x)))
+  }
+
+  def meanAveragePrecisionAndRecall(rankingPredictions : DataSet[(Int,Int,Int)], test : DataSet[(Int,Int,Double)]) : DataSet[(Int,Double,Double)] = {
+    val counted = countTypesUpToK(joinWithTest(rankingPredictions,test))
+
+    val calculatePrecision = (user:Int, truePositive:Int, falsePositive:Int, falseNegative:Int) =>
+      truePositive.toDouble/(truePositive.toDouble+falsePositive.toDouble)
+
+    val calculateRecall = (user:Int, truePositive:Int, falsePositive:Int, falseNegative:Int) =>
+      truePositive.toDouble/(truePositive.toDouble+falseNegative.toDouble)
+
+    counted
+      .map(x=>(x._1, x._3, x._4, x._5))
+      .map(x=>(x._1, calculatePrecision.tupled(x), calculateRecall.tupled(x)))
+      .groupBy(0)
+      .reduceGroup( elements => {
+        val bufferedElements = elements.toList
+        ( bufferedElements.head._1,
+          bufferedElements.map(_._2).sum/bufferedElements.length,
+          bufferedElements.map(_._3).sum/bufferedElements.length )
+      })
   }
 }
