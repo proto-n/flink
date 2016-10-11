@@ -25,7 +25,7 @@ import org.scalatest._
 
 import org.apache.flink.api.scala.ExecutionEnvironment
 import org.apache.flink.api.scala._
-import org.apache.flink.test.util.FlinkTestBase
+//import org.apache.flink.test.util.FlinkTestBase
 import Recommendation._
 
 class ALSITSuite

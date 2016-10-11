@@ -122,12 +122,14 @@ import scala.util.Random
   * [[https://github.com/apache/spark/blob/master/mllib/src/main/scala/org/apache/spark/mllib/
   * recommendation/ALS.scala here]].
   */
-class ALS extends Predictor[ALS] {
+class ALS extends Predictor[ALS] with RankingPredictor[ALS] {
+
 
   import ALS._
 
   // Stores the matrix factorization after the fitting phase
   var factorsOption: Option[(DataSet[Factors], DataSet[Factors])] = None
+  private var trainingData: Option[DataSet[(Int,Int,Double)]] = None
 
   /** Sets the number of latent factors/row dimension of the latent model
     *
@@ -452,6 +454,34 @@ object ALS {
     }
   }
 
+  implicit val trainingDataGetter =  new TrainingDataGetterOperation[ALS, (Int, Int, Double)] {
+    override def getTrainingData(instance: ALS): DataSet[(Int, Int, Double)] = instance.trainingData match {
+      case None => throw new RuntimeException("The ALS model has not been fitted to data. " +
+        "Prior to predicting values, it has to be trained on data.")
+      case Some(data) => data
+    }
+  }
+
+  implicit val itemsGetter =  new ItemsGetterOperation[ALS] {
+    override def getItems(instance: ALS): (DataSet[Int]) = instance.factorsOption match {
+      case None => throw new RuntimeException("The ALS model has not been fitted to data. " +
+        "Prior to predicting values, it has to be trained on data.")
+      case Some(factors) => factors._2.map(_.id)
+    }
+  }
+//  implicit val stateGetter = new TrainingDataGetterOperation[ALS, (Int, Int, Double)] with FactorsGetterOperation[ALS] {
+//    override def getTrainingData(instance: ALS): DataSet[(Int, Int, Double)] = instance.trainingData match {
+//      case None => throw new RuntimeException("The ALS model has not been fitted to data. " +
+//        "Prior to predicting values, it has to be trained on data.")
+//      case Some(data) => data
+//    }
+//    override def getFactors(instance: ALS): (DataSet[Factors], DataSet[Factors]) = instance.factorsOption match {
+//      case None => throw new RuntimeException("The ALS model has not been fitted to data. " +
+//        "Prior to predicting values, it has to be trained on data.")
+//      case Some(factors) => factors
+//    }
+//  }
+
   /** Calculates the matrix factorization for the given ratings. A rating is defined as
     * a tuple of user ID, item ID and the corresponding rating.
     *
@@ -463,6 +493,8 @@ object ALS {
         fitParameters: ParameterMap,
         input: DataSet[(Int, Int, Double)])
       : Unit = {
+      instance.trainingData = Some(input)
+
       val resultParameters = instance.parameters ++ fitParameters
 
       val userBlocks = resultParameters.get(Blocks).getOrElse(input.count.toInt)

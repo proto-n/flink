@@ -20,7 +20,8 @@
 package org.apache.flink.ml.evaluation
 
 import org.apache.flink.api.scala._
-import org.apache.flink.test.util.FlinkTestBase
+import org.apache.flink.ml.util.FlinkTestBase
+//import org.apache.flink.test.util.FlinkTestBase
 import org.scalatest.{FlatSpec, Matchers}
 
 

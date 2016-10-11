@@ -21,8 +21,13 @@ package org.apache.flink.ml.pipeline
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.scala._
 import org.apache.flink.ml._
-import org.apache.flink.ml.common.{FlinkMLTools, LabeledVector, ParameterMap, WithParameters}
+import org.apache.flink.ml.common._
 import org.apache.flink.ml.math.{Vector => FlinkVector}
+import org.apache.flink.ml.recommendation.ALS
+import org.apache.flink.ml.recommendation.ALS.Factors
+import org.apache.flink.util.Collector
+
+import scala.collection.mutable
 
 /** Predictor trait for Flink's pipeline operators.
   *
@@ -77,6 +82,101 @@ trait Predictor[Self] extends Estimator[Self] with WithParameters {
     : DataSet[(PredictionValue, PredictionValue)] = {
     FlinkMLTools.registerFlinkMLTypes(testing.getExecutionEnvironment)
     evaluator.evaluateDataSet(this, evaluateParameters, testing)
+  }
+}
+
+
+trait TrainingDataGetterOperation[Self, Training]{
+  def getTrainingData(instance: Self): DataSet[Training]
+}
+
+trait ItemsGetterOperation[Self]{
+  def getItems(instance: Self): (DataSet[Int])
+}
+
+trait RankingPredictor[Self] extends Estimator[Self] with WithParameters {
+  that: Self =>
+
+  def getUserItemPairs(users : DataSet[Int], items : DataSet[Int], exclude : DataSet[(Int,Int)]) : DataSet[(Int,Int)] = {
+    users.cross(items)
+      .leftOuterJoin(exclude).where(0,1).equalTo(0,1)
+      .apply((l,r,o:Collector[(Int,Int)])=>{
+        Option(r) match {
+          case Some(_) => ()
+          case None => o.collect(l)
+        }
+      })
+  }
+
+  def predictions(
+    topK: Int,
+    scores: DataSet[(Int,Int,Double)])
+  : DataSet[(Int, Int, Int)] = {
+    scores
+      .groupBy(0)
+      .combineGroup((elements, collector : Collector[(Int,Array[(Int,Double)])])=>{
+        val bufferedElements = elements.buffered
+        val head = bufferedElements.head
+        var topKitems = mutable.SortedSet[(Int,Int,Double)]()(Ordering[(Double, Int)].reverse.on(x => (x._3, x._2)))
+        for(e <- bufferedElements){
+          topKitems += e
+          if(topKitems.size > topK){
+            topKitems = topKitems.dropRight(1)
+          }
+        }
+        collector.collect((head._1,topKitems.toArray.map(x=>(x._2, x._3))))
+      })
+      .groupBy(0)
+      .reduce((l,r)=>{
+        var topKitems = mutable.SortedSet[(Int,Double)]()(Ordering[(Double, Int)].reverse.on(x => (x._2, x._1)))
+        topKitems ++= l._2 ++= r._2
+        (l._1, topKitems.take(topK).toArray)
+      })
+      .flatMap(x=>for(e<-x._2.zip(1 to topK)) yield (x._1, e._1._1, e._2))
+  }
+
+  def predictRankings(
+    k: Int,
+    users: DataSet[Int],
+    predictParameters: ParameterMap = ParameterMap.Empty)(implicit
+    predictor: PredictDataSetOperation[Self, (Int, Int), (Int ,Int, Double)],
+    trainingDataGetter: TrainingDataGetterOperation[Self, (Int, Int, Double)],
+    itemsGetter: ItemsGetterOperation[Self])
+  : DataSet[(Int,Int,Int)] = {
+    val trainData = trainingDataGetter.getTrainingData(this)
+    val items = itemsGetter.getItems(this)
+    val exclude : DataSet[(Int,Int)] =
+      if(predictParameters.get(RankingPredictor.ExcludeKnown).getOrElse(false))
+        trainData.map(x=>(x._1, x._2))
+      else
+        trainData.getExecutionEnvironment.fromCollection(Seq())
+    val userItemPairs = getUserItemPairs(users,items,exclude)
+    val scores = predictor.predictDataSet(this, predictParameters, userItemPairs)
+    this.predictions(k,scores)
+  }
+
+  def evaluateRankings(
+    testing: DataSet[(Int,Int,Double)],
+    evaluateParameters: ParameterMap = ParameterMap.Empty)
+//    (implicit evaluator: EvaluateDataSetOperation[Self, (Int,Int), (Int,Int,Double)])
+  : DataSet[(Int,Int,Int)] = {
+//    FlinkMLTools.registerFlinkMLTypes(testing.getExecutionEnvironment)
+//    evaluator.evaluateDataSet(this, evaluateParameters, testing)
+    null
+  }
+}
+
+object RankingPredictor{
+  implicit def itemsGetter[Instance](implicit
+    trainingDataGetterOperation: TrainingDataGetterOperation[Instance, (Int,Int,Double)]
+  ) = new ItemsGetterOperation[Instance] {
+    override def getItems(
+      instance: Instance)
+    : (DataSet[Int]) = trainingDataGetterOperation.getTrainingData(instance).map(_._2).distinct()
+  }
+
+  case object ExcludeKnown extends Parameter[Boolean] {
+    val defaultValue: Option[Boolean] = Some(true)
   }
 }
 
@@ -267,6 +367,16 @@ trait PredictOperation[Instance, Model, Testing, Prediction] extends Serializabl
   def predict(value: Testing, model: Model): Prediction
 }
 
+
+trait EvaluateOperation[Instance, Testing, Prediction] extends Serializable{
+  def evaluateDataSet(
+    instance: Instance,
+    evaluateParameters: ParameterMap,
+    testing: DataSet[Testing])
+  : DataSet[Prediction]
+}
+
+
 /** Type class for the evaluate operation of [[Predictor]]. This evaluate operation works on
   * DataSets.
   *
@@ -279,10 +389,11 @@ trait PredictOperation[Instance, Model, Testing, Prediction] extends Serializabl
   * @tparam Prediction The type of the label that the prediction operation will produce (output)
   *
   */
-trait EvaluateDataSetOperation[Instance, Testing, Prediction] extends Serializable{
+trait EvaluateDataSetOperation[Instance, Testing, PredictionValue]
+  extends EvaluateOperation[Instance, Testing, (PredictionValue, PredictionValue)] with Serializable{
   def evaluateDataSet(
       instance: Instance,
       evaluateParameters: ParameterMap,
       testing: DataSet[Testing])
-    : DataSet[(Prediction, Prediction)]
+    : DataSet[(PredictionValue, PredictionValue)]
 }
