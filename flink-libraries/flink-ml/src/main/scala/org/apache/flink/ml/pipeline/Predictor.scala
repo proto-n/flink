@@ -85,7 +85,6 @@ trait Predictor[Self] extends Estimator[Self] with WithParameters {
   }
 }
 
-
 trait TrainingDataGetterOperation[Self, Training]{
   def getTrainingData(instance: Self): DataSet[Training]
 }
@@ -97,7 +96,7 @@ trait ItemsGetterOperation[Self]{
 trait RankingPredictor[Self] extends Estimator[Self] with WithParameters {
   that: Self =>
 
-  def getUserItemPairs(users : DataSet[Int], items : DataSet[Int], exclude : DataSet[(Int,Int)]) : DataSet[(Int,Int)] = {
+  private def getUserItemPairs(users : DataSet[Int], items : DataSet[Int], exclude : DataSet[(Int,Int)]) : DataSet[(Int,Int)] = {
     users.cross(items)
       .leftOuterJoin(exclude).where(0,1).equalTo(0,1)
       .apply((l,r,o:Collector[(Int,Int)])=>{
@@ -108,7 +107,7 @@ trait RankingPredictor[Self] extends Estimator[Self] with WithParameters {
       })
   }
 
-  def predictions(
+  private def predictions(
     topK: Int,
     scores: DataSet[(Int,Int,Double)])
   : DataSet[(Int, Int, Int)] = {
@@ -368,14 +367,9 @@ trait PredictOperation[Instance, Model, Testing, Prediction] extends Serializabl
 }
 
 
-trait EvaluateOperation[Instance, Testing, Prediction] extends Serializable{
-  def evaluateDataSet(
-    instance: Instance,
-    evaluateParameters: ParameterMap,
-    testing: DataSet[Testing])
-  : DataSet[Prediction]
+trait PrepareOperation[Instance, Testing, PreparedData] extends Serializable{
+  def prepare(als: Instance, test : DataSet[Testing], parameters : ParameterMap) : DataSet[PreparedData]
 }
-
 
 /** Type class for the evaluate operation of [[Predictor]]. This evaluate operation works on
   * DataSets.
@@ -390,7 +384,17 @@ trait EvaluateOperation[Instance, Testing, Prediction] extends Serializable{
   *
   */
 trait EvaluateDataSetOperation[Instance, Testing, PredictionValue]
-  extends EvaluateOperation[Instance, Testing, (PredictionValue, PredictionValue)] with Serializable{
+  extends PrepareOperation[Instance, Testing, (PredictionValue, PredictionValue)] with Serializable{
+
+
+  override def prepare(
+    als: Instance,
+    test: DataSet[Testing],
+    parameters: ParameterMap)
+  : DataSet[(PredictionValue, PredictionValue)] = {
+    this.evaluateDataSet(als, parameters, test)
+  }
+
   def evaluateDataSet(
       instance: Instance,
       evaluateParameters: ParameterMap,

@@ -21,8 +21,23 @@ package org.apache.flink.ml.evaluation
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.scala._
 import org.apache.flink.ml._
+import org.apache.flink.ml.pipeline.{EvaluateDataSetOperation, Predictor, PrepareOperation, RankingPredictor}
 
 import scala.reflect.ClassTag
+
+
+trait AbstractScore[PredictorType[A], PrepareOperationType[A,B,C], Testing, Prediction] {
+  def evaluate (predictions: DataSet[Prediction], test: DataSet[Testing]): DataSet[Double]
+}
+
+trait RankingScore extends AbstractScore[RankingPredictor, PrepareOperation, (Int,Int,Double), (Int,Int,Int)]{
+  override def evaluate(
+    predictions: DataSet[(Int,Int,Int)],
+    test: DataSet[(Int,Int,Double)])
+  : DataSet[Double] = {
+    null
+  }
+}
 
 /**
  * Evaluation score
@@ -32,7 +47,9 @@ import scala.reflect.ClassTag
  *
  * @tparam PredictionType output type
  */
-trait Score[PredictionType] {
+trait PairwiseScore[PredictionType] extends AbstractScore[Predictor, EvaluateDataSetOperation, Double, (PredictionType, PredictionType)]{
+  override def evaluate(predictions: DataSet[(PredictionType, PredictionType)], test:DataSet[Double])
+  : DataSet[Double] = evaluate(predictions)
   def evaluate(trueAndPredicted: DataSet[(PredictionType, PredictionType)]): DataSet[Double]
 }
 
@@ -52,9 +69,9 @@ trait PerformanceScore
 abstract class MeanScore[PredictionType: TypeInformation: ClassTag](
     scoringFct: (PredictionType, PredictionType) => Double)
     (implicit yyt: TypeInformation[(PredictionType, PredictionType)])
-  extends Score[PredictionType] with Serializable {
+  extends PairwiseScore[PredictionType] with Serializable {
 
-  def evaluate(trueAndPredicted: DataSet[(PredictionType, PredictionType)]): DataSet[Double] = {
+  override def evaluate(trueAndPredicted: DataSet[(PredictionType, PredictionType)]): DataSet[Double] = {
     trueAndPredicted.map(yy => scoringFct(yy._1, yy._2)).mean()
   }
 }
@@ -90,7 +107,7 @@ object RegressionScores {
     * $R^2^$ indicates how well the data fit the a calculated model
     * Reference: [[http://en.wikipedia.org/wiki/Coefficient_of_determination]]
     */
-  def r2Score = new Score[Double] with PerformanceScore {
+  def r2Score = new PairwiseScore[Double] with PerformanceScore {
     override def evaluate(trueAndPredicted: DataSet[(Double, Double)]): DataSet[Double] = {
       val onlyTrue = trueAndPredicted.map(truthPrediction => truthPrediction._1)
       val meanTruth = onlyTrue.mean()
