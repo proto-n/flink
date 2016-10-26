@@ -21,17 +21,24 @@ package org.apache.flink.ml.evaluation
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.scala._
 import org.apache.flink.ml._
-import org.apache.flink.ml.pipeline.{EvaluateDataSetOperation, Predictor, PrepareOperation, RankingPredictor}
+import org.apache.flink.ml.pipeline.{EvaluateDataSetOperation, Predictor, RankingTestDataSetPrepareOperation, RankingPredictor}
 
 import scala.reflect.ClassTag
 
 
-trait AbstractScore[PredictorType[A], PrepareOperationType[A,B,C], Testing, Prediction] {
-  def evaluate (predictions: DataSet[Prediction], test: DataSet[Testing]): DataSet[Double]
-}
+trait AbstractScore[
+  PredictorType[PredictorInstanceType],
+  PrepareOperationType[PredictorInstanceType,InputTesting,Testing],
+  Testing, Prediction
+] {}
 
-trait RankingScore extends AbstractScore[RankingPredictor, PrepareOperation, (Int,Int,Double), (Int,Int,Int)]{
-  override def evaluate(
+trait RankingScore extends AbstractScore[
+  RankingPredictor,
+  RankingTestDataSetPrepareOperation,
+  (Int,Int,Double),
+  (Int,Int,Int)
+] {
+  def evaluate(
     predictions: DataSet[(Int,Int,Int)],
     test: DataSet[(Int,Int,Double)])
   : DataSet[Double] = {
@@ -48,8 +55,6 @@ trait RankingScore extends AbstractScore[RankingPredictor, PrepareOperation, (In
  * @tparam PredictionType output type
  */
 trait PairwiseScore[PredictionType] extends AbstractScore[Predictor, EvaluateDataSetOperation, Double, (PredictionType, PredictionType)]{
-  override def evaluate(predictions: DataSet[(PredictionType, PredictionType)], test:DataSet[Double])
-  : DataSet[Double] = evaluate(predictions)
   def evaluate(trueAndPredicted: DataSet[(PredictionType, PredictionType)]): DataSet[Double]
 }
 
