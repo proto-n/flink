@@ -59,10 +59,13 @@ class RankingScorer(override val score: RankingScore) extends Scorer(score) with
     evaluateParameters: ParameterMap)(implicit
     prepareOperation: PrepareOperation[PredictorInstance, InputTesting, (Int,Int,Double)])
   : DataSet[Double] = {
-    //calculate predictions from rankingpredictor
-    //give predictions and concrete typed test to score
-    //return score value
-    null
+    val resultingParameters = predictorInstance.parameters ++ evaluateParameters
+    // preparing testing DataSet to contain (Int,Int,Double)
+    val preparedTesting = prepareOperation.prepare(predictorInstance, testing, resultingParameters)
+    // giving ranking predictions
+    val predictions = predictorInstance.evaluateRankings(preparedTesting, resultingParameters)
+    // evaluation comparing the predicted rankings with the true ratings
+    score.evaluate(predictions, preparedTesting)
   }
 }
 
