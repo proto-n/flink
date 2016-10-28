@@ -69,8 +69,5 @@ class RankingScorer(override val score: RankingScore) extends Scorer(score) with
   }
 }
 
-object RankingScorer{
-  implicit def defaultRankingTestDataSetPrepareOperation[
-  PredictorInstance <: RankingPredictor[PredictorInstance]] =
-    new NoPrepareOperation[PredictorInstance, (Int,Int,Double)]()
+object RankingScorer {
 }
