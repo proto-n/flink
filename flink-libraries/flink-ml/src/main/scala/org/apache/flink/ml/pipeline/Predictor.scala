@@ -304,7 +304,8 @@ object Predictor {
   }
 
   implicit def withoutPrepareOperation[Instance, Testing]:
-  PrepareOperation[Instance, Testing, Testing] = new PrepareOperation[Instance, Testing, Testing] {
+  PrepareOperation[Instance, Testing, DataSet[Testing]] =
+    new PrepareOperation[Instance, Testing, DataSet[Testing]] {
     override def prepare(als: Instance, test: DataSet[Testing],
                          parameters: ParameterMap): DataSet[Testing] = test
   }
@@ -379,7 +380,7 @@ trait PrepareOperation[Instance, Testing, Prepared] extends Serializable {
                als: Instance,
                test : DataSet[Testing],
                parameters : ParameterMap)
-  : DataSet[Prepared]
+  : Prepared
 }
 
 /** Type class for the evaluate operation of [[Predictor]]. This evaluate operation works on
@@ -395,7 +396,7 @@ trait PrepareOperation[Instance, Testing, Prepared] extends Serializable {
   *
   */
 trait EvaluateDataSetOperation[Instance, Testing, Prediction] extends
-  PrepareOperation[Instance, Testing, (Prediction,Prediction)] {
+  PrepareOperation[Instance, Testing, DataSet[(Prediction,Prediction)]] {
 
   override def prepare(als: Instance,
                        test: DataSet[Testing],

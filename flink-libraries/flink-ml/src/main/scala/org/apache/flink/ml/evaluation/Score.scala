@@ -27,13 +27,21 @@ import scala.reflect.ClassTag
 
 trait AbstractScore[
   PredictorType[PredictorInstanceType],
-  Testing, Prediction
-] {}
+  PreparedTesting
+] {
+  def eval(test: PreparedTesting): DataSet[Double]
+}
 
 trait RankingScore extends AbstractScore[
   RankingPredictor,
-  (Int, Int, Double), (Int, Int, Int)
+  (DataSet[(Int, Int, Double)], DataSet[(Int,Int,Int)])
   ] {
+
+
+  override def eval(test: (DataSet[(Int, Int, Double)], DataSet[(Int, Int, Int)]))
+  : DataSet[Double] =
+    evaluate(test._2, test._1)
+
   def evaluate(
                 predictions: DataSet[(Int, Int, Int)],
                 test: DataSet[(Int, Int, Double)])
@@ -52,8 +60,12 @@ trait RankingScore extends AbstractScore[
  */
 trait PairwiseScore[PredictionType] extends AbstractScore[
   Predictor,
-  (Double, Double), (PredictionType, PredictionType)
+  DataSet[(PredictionType, PredictionType)]
 ] {
+
+  override def eval(test: DataSet[(PredictionType, PredictionType)]): DataSet[Double] =
+    evaluate(test)
+
   def evaluate(trueAndPredicted: DataSet[(PredictionType, PredictionType)]): DataSet[Double]
 }
 
