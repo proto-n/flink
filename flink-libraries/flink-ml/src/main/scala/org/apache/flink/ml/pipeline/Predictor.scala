@@ -366,13 +366,18 @@ trait PredictOperation[Instance, Model, Testing, Prediction] extends Serializabl
   def predict(value: Testing, model: Model): Prediction
 }
 
+trait PrepareOperation[Instance, Testing, Prepared] extends Serializable {
 
-trait RankingTestDataSetPrepareOperation[Instance, Testing, PreparedTestDataSet] extends Serializable{
   def prepare(
-    als: Instance,
-    test : DataSet[Testing],
-    parameters : ParameterMap)
-  : DataSet[PreparedTestDataSet]
+               als: Instance,
+               test : DataSet[Testing],
+               parameters : ParameterMap)
+  : DataSet[Prepared]
+}
+
+class NoPrepareOperation[Instance, Testing] extends PrepareOperation[Instance, Testing, Testing] {
+  override def prepare(als: Instance, test: DataSet[Testing],
+                       parameters: ParameterMap): DataSet[Testing] = test
 }
 
 /** Type class for the evaluate operation of [[Predictor]]. This evaluate operation works on
@@ -387,7 +392,15 @@ trait RankingTestDataSetPrepareOperation[Instance, Testing, PreparedTestDataSet]
   * @tparam Prediction The type of the label that the prediction operation will produce (output)
   *
   */
-trait EvaluateDataSetOperation[Instance, Testing, Prediction] extends Serializable{
+trait EvaluateDataSetOperation[Instance, Testing, Prediction] extends
+  PrepareOperation[Instance, Testing, (Prediction,Prediction)] {
+
+  override def prepare(als: Instance,
+                       test: DataSet[Testing],
+                       parameters: ParameterMap)
+  : DataSet[(Prediction, Prediction)] =
+    evaluateDataSet(als, parameters, test)
+
   def evaluateDataSet(
       instance: Instance,
       evaluateParameters: ParameterMap,

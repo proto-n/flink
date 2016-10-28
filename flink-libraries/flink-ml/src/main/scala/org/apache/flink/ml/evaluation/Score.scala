@@ -21,26 +21,22 @@ package org.apache.flink.ml.evaluation
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.scala._
 import org.apache.flink.ml._
-import org.apache.flink.ml.pipeline.{EvaluateDataSetOperation, Predictor, RankingTestDataSetPrepareOperation, RankingPredictor}
+import org.apache.flink.ml.pipeline._
 
 import scala.reflect.ClassTag
 
-
 trait AbstractScore[
   PredictorType[PredictorInstanceType],
-  PrepareOperationType[PredictorInstanceType,InputTesting,Testing],
   Testing, Prediction
 ] {}
 
 trait RankingScore extends AbstractScore[
   RankingPredictor,
-  RankingTestDataSetPrepareOperation,
-  (Int,Int,Double),
-  (Int,Int,Int)
-] {
+  (Int, Int, Double), (Int, Int, Int)
+  ] {
   def evaluate(
-    predictions: DataSet[(Int,Int,Int)],
-    test: DataSet[(Int,Int,Double)])
+                predictions: DataSet[(Int, Int, Int)],
+                test: DataSet[(Int, Int, Double)])
   : DataSet[Double] = {
     null
   }
@@ -54,7 +50,10 @@ trait RankingScore extends AbstractScore[
  *
  * @tparam PredictionType output type
  */
-trait PairwiseScore[PredictionType] extends AbstractScore[Predictor, EvaluateDataSetOperation, Double, (PredictionType, PredictionType)]{
+trait PairwiseScore[PredictionType] extends AbstractScore[
+  Predictor,
+  (Double, Double), (PredictionType, PredictionType)
+] {
   def evaluate(trueAndPredicted: DataSet[(PredictionType, PredictionType)]): DataSet[Double]
 }
 

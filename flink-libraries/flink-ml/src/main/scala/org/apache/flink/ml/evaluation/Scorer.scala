@@ -24,29 +24,30 @@ import org.apache.flink.ml.pipeline._
 //TODO: Need to generalize type of Score (and evaluateOperation)
 abstract class Scorer[
   PredictorType[PredictorInstanceType],
-  PrepareOperationType[PredictorInstanceType,InputTesting,Testing],
   Testing,
   Prediction
-] (val score: AbstractScore[PredictorType, PrepareOperationType, Testing, Prediction]) extends WithParameters {
+] (val score: AbstractScore[PredictorType, Testing, Prediction])
+  extends WithParameters {
   def evaluate[InputTesting, PredictorInstance <: PredictorType[PredictorInstance]](
       testing: DataSet[InputTesting],
       predictorInstance: PredictorInstance,
       evaluateParameters: ParameterMap = ParameterMap.Empty)(implicit
-    prepareOperation: PrepareOperationType[PredictorInstance, InputTesting, Testing]):
+    prepareOperation: PrepareOperation[PredictorInstance, InputTesting, Testing]):
     DataSet[Double]
 }
 
 class PairwiseScorer(override val score: PairwiseScore[Double])
   extends Scorer(score) with WithParameters
 {
+
   override def evaluate[InputTesting, PredictorInstance <: Predictor[PredictorInstance]](
     testing: DataSet[InputTesting],
     predictorInstance: PredictorInstance,
     evaluateParameters: ParameterMap)(implicit
-    evaluateOperation: EvaluateDataSetOperation[PredictorInstance, InputTesting, Double])
+    prepareOperation: PrepareOperation[PredictorInstance, InputTesting, (Double, Double)])
   : DataSet[Double] = {
     val resultingParameters = predictorInstance.parameters ++ evaluateParameters
-    val predictions = predictorInstance.evaluate[InputTesting, Double](testing, resultingParameters)
+    val predictions = prepareOperation.prepare(predictorInstance, testing, resultingParameters)
     score.evaluate(predictions)
   }
 }
@@ -56,7 +57,7 @@ class RankingScorer(override val score: RankingScore) extends Scorer(score) with
     testing: DataSet[InputTesting],
     predictorInstance: PredictorInstance,
     evaluateParameters: ParameterMap)(implicit
-    prepareOperation: RankingTestDataSetPrepareOperation[PredictorInstance, InputTesting, (Int,Int,Double)])
+    prepareOperation: PrepareOperation[PredictorInstance, InputTesting, (Int,Int,Double)])
   : DataSet[Double] = {
     //calculate predictions from rankingpredictor
     //give predictions and concrete typed test to score
@@ -66,12 +67,7 @@ class RankingScorer(override val score: RankingScore) extends Scorer(score) with
 }
 
 object RankingScorer{
-  implicit def defaultRankingTestDataSetPrepareOperation[PredictorInstance <: RankingPredictor[PredictorInstance]] =
-    new RankingTestDataSetPrepareOperation[PredictorInstance, (Int,Int,Double), (Int,Int,Double)] {
-      override def prepare(
-        als: PredictorInstance,
-        test: DataSet[(Int,Int,Double)],
-        parameters: ParameterMap)
-      : DataSet[(Int, Int, Double)] = test
-  }
+  implicit def defaultRankingTestDataSetPrepareOperation[
+  PredictorInstance <: RankingPredictor[PredictorInstance]] =
+    new NoPrepareOperation[PredictorInstance, (Int,Int,Double)]()
 }
