@@ -83,6 +83,7 @@ class RankingRecommendationScores(val topK : Int) {
         }
         collector.collect((head._1,topKitems.toArray.map(x=>(x._2, x._3))))
       })
+      .withForwardedFields("0")
       .groupBy(0)
       .reduce((l,r)=>{
         var topKitems = mutable.SortedSet[(Int,Double)]()(Ordering[(Double, Int)].reverse.on(x => (x._2, x._1)))
