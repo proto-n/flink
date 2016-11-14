@@ -35,7 +35,7 @@ class ScorerITSuite  extends FlatSpec with Matchers with FlinkTestBase {
 
     val loss = RegressionScores.squaredLoss
 
-    val scorer = new PairwiseScorer(loss)
+    val scorer = new Scorer(loss)
 
     val mlr = MultipleLinearRegression()
 

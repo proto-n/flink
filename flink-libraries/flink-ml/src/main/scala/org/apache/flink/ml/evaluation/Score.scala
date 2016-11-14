@@ -25,29 +25,26 @@ import org.apache.flink.ml.pipeline._
 
 import scala.reflect.ClassTag
 
-trait AbstractScore[
+trait Score[
   PredictorType[PredictorInstanceType],
   PreparedTesting
 ] {
-  def eval(test: PreparedTesting): DataSet[Double]
+  def evaluate(test: PreparedTesting): DataSet[Double]
 }
 
-trait RankingScore extends AbstractScore[
+trait RankingScore extends Score[
   RankingPredictor,
   (DataSet[(Int, Int, Double)], DataSet[(Int,Int,Int)])
   ] {
+  // We will either have to add a k:Int parameter into the test tuple,
+  // count the predictions in the DataSet[Int,Int,Int], or add
+  // scoreParameters to the Score trait. The latter is the most preferable,
+  // since the value of topK is a parameter of the score that is being
+  // calculated. While deciding, it is hardcoded here.
+  val topK = 100
 
-
-  override def eval(test: (DataSet[(Int, Int, Double)], DataSet[(Int, Int, Int)]))
-  : DataSet[Double] =
-    evaluate(test._2, test._1)
-
-  def evaluate(
-                predictions: DataSet[(Int, Int, Int)],
-                test: DataSet[(Int, Int, Double)])
-  : DataSet[Double] = {
-    null
-  }
+  override def evaluate(testAndPredictions: (DataSet[(Int, Int, Double)], DataSet[(Int, Int, Int)]))
+  : DataSet[Double]
 }
 
 /**
@@ -58,14 +55,10 @@ trait RankingScore extends AbstractScore[
  *
  * @tparam PredictionType output type
  */
-trait PairwiseScore[PredictionType] extends AbstractScore[
+trait PairwiseScore[PredictionType] extends Score[
   Predictor,
   DataSet[(PredictionType, PredictionType)]
 ] {
-
-  override def eval(test: DataSet[(PredictionType, PredictionType)]): DataSet[Double] =
-    evaluate(test)
-
   def evaluate(trueAndPredicted: DataSet[(PredictionType, PredictionType)]): DataSet[Double]
 }
 

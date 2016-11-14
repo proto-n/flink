@@ -19,7 +19,7 @@
 package org.apache.flink.ml.pipeline
 
 import org.apache.flink.api.common.typeinfo.TypeInformation
-import org.apache.flink.api.scala._
+import org.apache.flink.api.scala.{DataSet, _}
 import org.apache.flink.ml._
 import org.apache.flink.ml.common._
 import org.apache.flink.ml.math.{Vector => FlinkVector}
@@ -85,18 +85,49 @@ trait Predictor[Self] extends Estimator[Self] with WithParameters {
   }
 }
 
-trait TrainingDataGetterOperation[Self, Training]{
-  def getTrainingData(instance: Self): DataSet[Training]
-}
-
-trait ItemsGetterOperation[Self]{
-  def getItems(instance: Self): (DataSet[Int])
-}
-
 trait RankingPredictor[Self] extends Estimator[Self] with WithParameters {
   that: Self =>
 
-  private def getUserItemPairs(users : DataSet[Int], items : DataSet[Int], exclude : DataSet[(Int,Int)]) : DataSet[(Int,Int)] = {
+  def predictRankings(
+    k: Int,
+    users: DataSet[Int],
+    predictParameters: ParameterMap = ParameterMap.Empty)(implicit
+    rankingPredictOperation : RankingPredictOperation[Self])
+  : DataSet[(Int,Int,Int)] =
+    rankingPredictOperation.predictRankings(this, k, users, predictParameters)
+
+  def evaluateRankings(
+    testing: DataSet[(Int,Int,Double)],
+    evaluateParameters: ParameterMap = ParameterMap.Empty)(implicit
+    rankingPredictOperation : RankingPredictOperation[Self])
+  : DataSet[(Int,Int,Int)] = {
+    //todo
+    predictRankings(100, testing.map(_._1).distinct(), evaluateParameters)
+  }
+}
+
+trait RankingPredictOperation[Instance] {
+  def predictRankings(
+    instance: Instance,
+    k: Int,
+    users: DataSet[Int],
+    predictParameters: ParameterMap = ParameterMap.Empty)
+  : DataSet[(Int, Int, Int)]
+}
+
+trait TrainingRatingsProvider{
+  def getTrainingData : DataSet[(Int,Int,Double)]
+  def getTrainingItems : DataSet[Int] = {
+    getTrainingData.map(_._2).distinct()
+  }
+}
+
+class RankingFromRatingPredictOperation[Instance <: TrainingRatingsProvider]
+  (val ratingPredictor : PredictDataSetOperation[Instance, (Int,Int), (Int,Int,Double)])
+  extends RankingPredictOperation[Instance]
+{
+  private def getUserItemPairs(users : DataSet[Int], items : DataSet[Int], exclude : DataSet[(Int,Int)])
+  : DataSet[(Int,Int)] = {
     users.cross(items)
       .leftOuterJoin(exclude).where(0,1).equalTo(0,1)
       .apply((l,r,o:Collector[(Int,Int)])=>{
@@ -107,7 +138,7 @@ trait RankingPredictor[Self] extends Estimator[Self] with WithParameters {
       })
   }
 
-  private def predictions(
+  def predictions(
     topK: Int,
     scores: DataSet[(Int,Int,Double)])
   : DataSet[(Int, Int, Int)] = {
@@ -134,46 +165,26 @@ trait RankingPredictor[Self] extends Estimator[Self] with WithParameters {
       .flatMap(x=>for(e<-x._2.zip(1 to topK)) yield (x._1, e._1._1, e._2))
   }
 
-  def predictRankings(
+  override def predictRankings(
+    instance: Instance,
     k: Int,
     users: DataSet[Int],
-    predictParameters: ParameterMap = ParameterMap.Empty)(implicit
-    predictor: PredictDataSetOperation[Self, (Int, Int), (Int ,Int, Double)],
-    trainingDataGetter: TrainingDataGetterOperation[Self, (Int, Int, Double)],
-    itemsGetter: ItemsGetterOperation[Self])
+    predictParameters: ParameterMap = ParameterMap.Empty)
   : DataSet[(Int,Int,Int)] = {
-    val trainData = trainingDataGetter.getTrainingData(this)
-    val items = itemsGetter.getItems(this)
+    val trainData = instance.getTrainingData
+    val items = instance.getTrainingItems
     val exclude : DataSet[(Int,Int)] =
       if(predictParameters.get(RankingPredictor.ExcludeKnown).getOrElse(false))
         trainData.map(x=>(x._1, x._2))
       else
         trainData.getExecutionEnvironment.fromCollection(Seq())
     val userItemPairs = getUserItemPairs(users,items,exclude)
-    val scores = predictor.predictDataSet(this, predictParameters, userItemPairs)
+    val scores = ratingPredictor.predictDataSet(instance, predictParameters, userItemPairs)
     this.predictions(k,scores)
-  }
-
-  def evaluateRankings(
-    testing: DataSet[(Int,Int,Double)],
-    evaluateParameters: ParameterMap = ParameterMap.Empty)
-//    (implicit evaluator: EvaluateDataSetOperation[Self, (Int,Int), (Int,Int,Double)])
-  : DataSet[(Int,Int,Int)] = {
-//    FlinkMLTools.registerFlinkMLTypes(testing.getExecutionEnvironment)
-//    evaluator.evaluateDataSet(this, evaluateParameters, testing)
-    null
   }
 }
 
 object RankingPredictor{
-  implicit def itemsGetter[Instance](implicit
-    trainingDataGetterOperation: TrainingDataGetterOperation[Instance, (Int,Int,Double)]
-  ) = new ItemsGetterOperation[Instance] {
-    override def getItems(
-      instance: Instance)
-    : (DataSet[Int]) = trainingDataGetterOperation.getTrainingData(instance).map(_._2).distinct()
-  }
-
   case object ExcludeKnown extends Parameter[Boolean] {
     val defaultValue: Option[Boolean] = Some(true)
   }

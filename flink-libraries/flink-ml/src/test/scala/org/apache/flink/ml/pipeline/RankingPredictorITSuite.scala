@@ -33,12 +33,12 @@ import org.scalatest.{FlatSpec, Matchers}
 class RankingPredictorITSuite extends FlatSpec with Matchers with FlinkTestBase {
 
   behavior of "Evaluation of ranking prediction"
-  it should "make ranking predictions correctly" in {
+  it should "make ranking predictions correctly based on rating predictions" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
-    val mockedPredictor = new PredictDataSetOperation[MockPredictor, (Int, Int), (Int ,Int, Double)] {
+    val mockedPredictor = new PredictDataSetOperation[MockFromRatingPredictor, (Int, Int), (Int ,Int, Double)] {
       override def predictDataSet(
-        instance: MockPredictor,
+        instance: MockFromRatingPredictor,
         predictParameters: ParameterMap,
         input: DataSet[(Int, Int)])
       : DataSet[(Int, Int, Double)] = env.fromCollection(Seq(
@@ -53,20 +53,17 @@ class RankingPredictorITSuite extends FlatSpec with Matchers with FlinkTestBase 
         (2,5,0.9)
       ))
     }
-    class MockPredictor extends Predictor[MockPredictor] with RankingPredictor[MockPredictor] {}
-    val mockPredictor = new MockPredictor()
+    val rankingFromRatingPredictOperation = new RankingFromRatingPredictOperation(mockedPredictor)
+    class MockFromRatingPredictor extends RankingPredictor[MockFromRatingPredictor] with TrainingRatingsProvider {
+      override def getTrainingItems: DataSet[Int] =
+        env.fromCollection(Seq(1,2,3))
+      override def getTrainingData: DataSet[(Int, Int, Double)] =
+        env.fromCollection(Seq((3,1,1.0),(3,2,1.0),(3,3,1.0),(3,4,1.0), (3,5,1.0)))
+    }
+
+    val mockPredictor = new MockFromRatingPredictor()
     val users = env.fromCollection(Seq(1,2))
-    val rankings = mockPredictor.predictRankings(3,users,new ParameterMap)(
-      mockedPredictor,
-      new TrainingDataGetterOperation[MockPredictor, (Int, Int, Double)] {
-        override def getTrainingData(instance: MockPredictor): DataSet[(Int, Int, Double)] =
-          env.fromCollection(Seq((3,1,1.0),(3,2,1.0),(3,3,1.0),(3,4,1.0), (3,5,1.0)))
-      },
-      new ItemsGetterOperation[MockPredictor] {
-        override def getItems(instance: MockPredictor): DataSet[Int] =
-          env.fromCollection(Seq(1,2,3))
-      }
-    ).collect()
+    val rankings = mockPredictor.predictRankings(3,users,new ParameterMap)(rankingFromRatingPredictOperation).collect()
     rankings.toSet shouldBe Set(
       (1,4,1),
       (1,2,2),
@@ -79,9 +76,9 @@ class RankingPredictorITSuite extends FlatSpec with Matchers with FlinkTestBase 
   it should "use default itemsgetter if neccessary" in {
     val env = ExecutionEnvironment.getExecutionEnvironment
 
-    val mockedPredictor = new PredictDataSetOperation[MockPredictor2, (Int, Int), (Int ,Int, Double)] {
+    val mockedPredictor = new PredictDataSetOperation[MockFromRatingPredictor, (Int, Int), (Int ,Int, Double)] {
       override def predictDataSet(
-        instance: MockPredictor2,
+        instance: MockFromRatingPredictor,
         predictParameters: ParameterMap,
         input: DataSet[(Int, Int)])
       : DataSet[(Int, Int, Double)] = env.fromCollection(Seq(
@@ -96,20 +93,15 @@ class RankingPredictorITSuite extends FlatSpec with Matchers with FlinkTestBase 
         (2,5,0.9)
       ))
     }
-    class MockPredictor2 extends Predictor[MockPredictor2] with RankingPredictor[MockPredictor2] {}
-    object MockPredictor2{
-      implicit val trainingDataGetterOperation = new TrainingDataGetterOperation[MockPredictor2, (Int, Int, Double)] {
-        override def getTrainingData(instance: MockPredictor2): DataSet[(Int, Int, Double)] =
-          env.fromCollection(Seq((3,1,1.0),(3,2,1.0),(3,3,1.0)))
-      }
+    val rankingFromRatingPredictOperation = new RankingFromRatingPredictOperation(mockedPredictor)
+    class MockFromRatingPredictor extends RankingPredictor[MockFromRatingPredictor] with TrainingRatingsProvider {
+      override def getTrainingData: DataSet[(Int, Int, Double)] =
+        env.fromCollection(Seq((3,1,1.0),(3,2,1.0),(3,3,1.0),(3,4,1.0), (3,5,1.0)))
     }
-    val mockPredictor = new MockPredictor2()
+
+    val mockPredictor = new MockFromRatingPredictor()
     val users = env.fromCollection(Seq(1,2))
-    val rankings = mockPredictor.predictRankings(3,users,new ParameterMap)(
-      mockedPredictor,
-      implicitly,
-      implicitly
-    ).collect()
+    val rankings = mockPredictor.predictRankings(3,users,new ParameterMap)(rankingFromRatingPredictOperation).collect()
     rankings.toSet shouldBe Set(
       (1,4,1),
       (1,2,2),
@@ -142,21 +134,17 @@ class RankingPredictorITSuite extends FlatSpec with Matchers with FlinkTestBase 
         ))
       }
     }
-    class MockPredictor extends Predictor[MockPredictor] with RankingPredictor[MockPredictor] {}
+    val rankingFromRatingPredictOperation = new RankingFromRatingPredictOperation(mockedPredictor)
+    class MockPredictor extends RankingPredictor[MockPredictor] with TrainingRatingsProvider{
+      override def getTrainingData: DataSet[(Int, Int, Double)] =
+        env.fromCollection(Seq((3,1,1.0),(3,2,1.0),(2,3,1.0)))
+      override def getTrainingItems: DataSet[Int] =
+        env.fromCollection(Seq(1,2,3,4,5))
+    }
     val mockPredictor = new MockPredictor()
     val users = env.fromCollection(Seq(1,2))
     val par = new ParameterMap
-    val rankings = mockPredictor.predictRankings(3,users,par)(
-      mockedPredictor,
-      new TrainingDataGetterOperation[MockPredictor, (Int, Int, Double)] {
-        override def getTrainingData(instance: MockPredictor): DataSet[(Int, Int, Double)] =
-          env.fromCollection(Seq((3,1,1.0),(3,2,1.0),(2,3,1.0)))
-      },
-      new ItemsGetterOperation[MockPredictor] {
-        override def getItems(instance: MockPredictor): DataSet[Int] =
-          env.fromCollection(Seq(1,2,3,4,5))
-      }
-    ).collect()
+    mockPredictor.predictRankings(3,users,par)(rankingFromRatingPredictOperation).collect()
     calledArguments.collect().toSet shouldBe Set(
       (1,1),
       (1,2),
@@ -169,17 +157,7 @@ class RankingPredictorITSuite extends FlatSpec with Matchers with FlinkTestBase 
       (2,5)
     )
     par.add(RankingPredictor.ExcludeKnown, false)
-    val rankings2 = mockPredictor.predictRankings(3,users,par)(
-      mockedPredictor,
-      new TrainingDataGetterOperation[MockPredictor, (Int, Int, Double)] {
-        override def getTrainingData(instance: MockPredictor): DataSet[(Int, Int, Double)] =
-          env.fromCollection(Seq((3,1,1.0),(3,2,1.0),(2,3,1.0)))
-      },
-      new ItemsGetterOperation[MockPredictor] {
-        override def getItems(instance: MockPredictor): DataSet[Int] =
-          env.fromCollection(Seq(1,2,3,4,5))
-      }
-    ).collect()
+    mockPredictor.predictRankings(3,users,par)(rankingFromRatingPredictOperation).collect()
     calledArguments.collect().toSet shouldBe Set(
       (1,1),
       (1,2),
